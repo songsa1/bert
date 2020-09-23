@@ -25,6 +25,7 @@ import modeling
 import optimization
 import tokenization
 import tensorflow as tf
+import pandas as pd
 
 flags = tf.flags
 
@@ -75,15 +76,15 @@ flags.DEFINE_bool(
     "do_predict", False,
     "Whether to run the model in inference mode on the test set.")
 
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
+flags.DEFINE_integer("train_batch_size", 1, "Total batch size for training.")
 
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
+flags.DEFINE_integer("eval_batch_size", 1, "Total batch size for eval.")
 
-flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
+flags.DEFINE_integer("predict_batch_size", 1, "Total batch size for predict.")
 
 flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
-flags.DEFINE_float("num_train_epochs", 3.0,
+flags.DEFINE_float("num_train_epochs", 2.0,
                    "Total number of training epochs to perform.")
 
 flags.DEFINE_float(
@@ -177,18 +178,22 @@ class InputFeatures(object):
 class DataProcessor(object):
   """Base class for data converters for sequence classification data sets."""
 
+    # 获取训练输入数据
   def get_train_examples(self, data_dir):
     """Gets a collection of `InputExample`s for the train set."""
     raise NotImplementedError()
 
+    # 获取验证输入数据
   def get_dev_examples(self, data_dir):
     """Gets a collection of `InputExample`s for the dev set."""
     raise NotImplementedError()
 
+    # 获取测试输入数据
   def get_test_examples(self, data_dir):
     """Gets a collection of `InputExample`s for prediction."""
     raise NotImplementedError()
 
+    # 获取labels
   def get_labels(self):
     """Gets the list of labels for this data set."""
     raise NotImplementedError()
@@ -204,6 +209,7 @@ class DataProcessor(object):
       return lines
 
 
+# 针对各个数据集的类
 class XnliProcessor(DataProcessor):
   """Processor for the XNLI data set."""
 
@@ -372,6 +378,56 @@ class ColaProcessor(DataProcessor):
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
+
+
+# 针对自己训练集的处理类
+class SimProcessor(DataProcessor):
+    def get_train_examples(self, data_dir):
+        file_path = os.path.join(data_dir, 'train.csv')
+        train_df = pd.read_csv(file_path, encoding='utf-8')
+        train_data = []
+        for index, train in enumerate(train_df.values):
+            guid = 'train-%d' % index
+            text_a = tokenization.convert_to_unicode(str(train[0]))
+            text_b = tokenization.convert_to_unicode(str(train[1]))
+            label = str(train[2])
+            train_data.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return train_data
+
+    def get_dev_examples(self, data_dir):
+        file_path = os.path.join(data_dir, 'dev.csv')
+        dev_df = pd.read_csv(file_path, encoding='utf-8')
+        dev_data = []
+        for index, dev in enumerate(dev_df.values):
+            guid = 'test-%d' % index
+            text_a = tokenization.convert_to_unicode(str(dev[0]))
+            text_b = tokenization.convert_to_unicode(str(dev[1]))
+            label = str(dev[2])
+            dev_data.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return dev_data
+
+    def get_test_examples(self, data_dir):
+        file_path = os.path.join(data_dir, 'test.csv')
+        test_df = pd.read_csv(file_path, encoding='utf-8')
+        test_data = []
+        for index, test in enumerate(test_df.values):
+            guid = 'test-%d' % index
+            text_a = tokenization.convert_to_unicode(str(test[0]))
+            text_b = tokenization.convert_to_unicode(str(test[1]))
+            label = str(test[2])
+            test_data.append(InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+        return test_data
+
+    def get_sentence_examples(self, questions):
+        for index, data in enumerate(questions):
+            guid = 'test-%d' % index
+            text_a = tokenization.convert_to_unicode(str(data[0]))
+            text_b = tokenization.convert_to_unicode(str(data[1]))
+            label = str(0)
+            yield InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label)
+
+    def get_labels(self):
+        return ['0', '1']
 
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
@@ -784,10 +840,11 @@ def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
   processors = {
-      "cola": ColaProcessor,
-      "mnli": MnliProcessor,
-      "mrpc": MrpcProcessor,
-      "xnli": XnliProcessor,
+      # "cola": ColaProcessor,
+      # "mnli": MnliProcessor,
+      # "mrpc": MrpcProcessor,
+      # "xnli": XnliProcessor,
+      'sim' : SimProcessor  # 自定义类
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -964,18 +1021,18 @@ def main(_):
         probabilities = prediction["probabilities"]
         if i >= num_actual_predict_examples:
           break
-        output_line = "\t".join(
-            str(class_probability)
-            for class_probability in probabilities) + "\n"
+        output_line = "\t".join(str(class_probability) for class_probability in probabilities) + "\n"
         writer.write(output_line)
         num_written_lines += 1
     assert num_written_lines == num_actual_predict_examples
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("data_dir")
-  flags.mark_flag_as_required("task_name")
-  flags.mark_flag_as_required("vocab_file")
-  flags.mark_flag_as_required("bert_config_file")
-  flags.mark_flag_as_required("output_dir")
+  flags.mark_flag_as_required("data_dir")  # 数据存放地址
+  flags.mark_flag_as_required("task_name")  # processor名字
+  flags.mark_flag_as_required("vocab_file")  # 字典文件地址
+  flags.mark_flag_as_required("bert_config_file")  # 配置文件
+  flags.mark_flag_as_required("output_dir")  # 模型输出地址
   tf.app.run()
+
+# """python run_classifier.py --task_name=SIM --do_train=true --do_eval=true --data_dir=F:\code\NLP\bert\data --vocab_file=F:\code\NLP\bert\chinese_L-12_H-768_A-12\vocab.txt --bert_config_file=F:\code\NLP\bert\chinese_L-12_H-768_A-12\bert_config.json --init_checkpoint=F:\code\NLP\bert\chinese_L-12_H-768_A-12/bert_model.ckpt --max_seq_length=128 --train_batch_size=1 --learning_rate=5e-5 --num_train_epochs=2.0 --output_dir=F:\code\NLP\bert\sim_output"""
